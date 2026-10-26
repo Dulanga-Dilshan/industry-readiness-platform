@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package scraper.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Called by the backend. The backend is always the client.
+service ScraperService {
+  // Scrape new postings, classify the new ones and stream the results back.
+  // The backend runs this every 24 hours. The last event is always a summary.
+  rpc ScrapeLatest(ScrapeLatestRequest) returns (stream ScrapeEvent);
+}
+
+service ClassifierService {
+  // Classify text that is already stored (for example after the rules improve).
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
+}
+
+message ScrapeLatestRequest {
+  repeated string sources = 1;      // empty = all default sources
+  repeated string known_keys = 2;   // "source:id" keys already stored in the database
+  int32 limit = 3;                  // 0 = no limit
+  int32 max_age_days = 4;           // 0 = default (3 days for LinkedIn)
+}
+
+message ScrapeEvent {
+  oneof event {
+    ClassifiedJob job = 1;
+    ScrapeSummary summary = 2;
+  }
+}
+
+message ClassifiedJob {
+  string key = 1;                   // "source:id", unique across sources
+  string source = 2;
+  string source_id = 3;
+  string title = 4;
+  string company = 5;
+  string location = 6;
+  string link = 7;
+  string description = 8;           // empty for known jobs (not fetched again)
+  google.protobuf.Timestamp posted_at = 9;    // not set when the source has no date
+  google.protobuf.Timestamp scraped_at = 10;
+  bool is_new = 11;                 // false = already stored, only update last_seen
+  string cluster = 12;              // empty for known jobs
+  float confidence = 13;
+  repeated string skills = 14;
+}
+
+message ScrapeSummary {
+  int32 total = 1;
+  int32 new_jobs = 2;
+  map<string, int32> counts = 3;    // jobs returned per source
+  map<string, string> errors = 4;   // source -> error, for sources that failed
+}
+
+message ClassifyRequest {
+  repeated ClassifyItem items = 1;
+}
+
+message ClassifyItem {
+  string key = 1;
+  string title = 2;
+  string description = 3;
+}
+
+message ClassifyResponse {
+  repeated ClassifyResult results = 1;
+}
+
+message ClassifyResult {
+  string key = 1;
+  string cluster = 2;
+  float confidence = 3;
+  repeated string skills = 4;
+}
