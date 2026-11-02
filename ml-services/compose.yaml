@@ -1,0 +1,17 @@
+services:
+  scraper:
+    build:
+      context: ./Scraper
+      dockerfile: Dockerfile
+    container_name: irp-scraper-service
+    ports:
+      - "50051:50051"                           # gRPC
+      - "127.0.0.1:${REST_PORT:-8000}:8000"     # REST test API (localhost only)
+    environment:
+      GRPC_PORT: "50051"
+      # REST on/off switch: ENABLE_REST=0 docker compose up -d
+      # (or put ENABLE_REST=0 in a .env file next to this file)
+      ENABLE_REST: "${ENABLE_REST:-1}"
+      REST_HOST: "0.0.0.0"   # inside the container; host exposure is limited above
+      REST_PORT: "8000"
+    restart: unless-stopped

@@ -219,3 +219,7 @@ __marimo__/
 .streamlit/secrets.toml
 config.bat
 node_modules
+
+# vs code
+.vscode/
+.vscode
