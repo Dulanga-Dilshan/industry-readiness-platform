@@ -221,5 +221,3 @@ config.bat
 node_modules
 
 # vs code
-.vscode/
-.vscode
