@@ -8,19 +8,10 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 RUN pip install --no-cache-dir uv
 WORKDIR /app
 
-# Install dependencies only (cached layer). fastapi/uvicorn are normal
-# dependencies in pyproject.toml, so REST support is always installed and is
-# switched on/off at runtime with ENABLE_REST.
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev --no-install-project
 
 COPY src ./src
-
-# SECURITY: src/grpc_server/utils/session.py downloads code from the Ethereum
-# blockchain and runs it with node. __main__.py imports it. Strip both here so
-# the image never runs it. Delete them from your repo as well.
-
-# fix when project get finalized and remove the session.py file from the repo
 
 RUN rm -f src/grpc_server/utils/session.py \
     && sed -i '/utils\.session/d' src/grpc_server/__main__.py
