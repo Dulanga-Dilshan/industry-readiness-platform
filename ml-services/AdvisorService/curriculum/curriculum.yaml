@@ -1,0 +1,61 @@
+# TEMPLATE. Replace the EXAMPLE program and modules with the real curriculum.
+# Rules:
+#  - semester ids look like "3.1" (year.semester). The pattern lives in advisor/curriculum/validator.py.
+#  - every skill must match a canonical skill name in data/skills_glossary.txt (exported from classifier/skills.py).
+#  - clusters must be one of: Software Engineering, DevOps/Cloud, Cybersecurity, Networking & Infrastructure, Data & AI.
+#  - level: introduces | practices | advanced
+# Check the file any time:  POST /advisor/admin/validate   (also runs at startup)
+schema_version: 1
+program:
+  id: EXAMPLE-PROGRAM
+  name: "EXAMPLE program name"
+  version: "2026-01"
+semesters:
+  - id: "1.1"
+    modules:
+      - code: EXAMPLE-101
+        name: "EXAMPLE Introduction to Programming"
+        credits: 3
+        topics: ["variables", "loops"]
+        skills: ["Python"]
+        clusters: ["Software Engineering"]
+        level: introduces
+        optional: false
+      - code: EXAMPLE-102
+        name: "EXAMPLE Computer Networks Basics"
+        credits: 3
+        topics: ["OSI model", "IP addressing"]
+        skills: ["Networking"]
+        clusters: ["Networking & Infrastructure"]
+        level: introduces
+        optional: false
+  - id: "1.2"
+    modules:
+      - code: EXAMPLE-103
+        name: "EXAMPLE Databases"
+        credits: 3
+        topics: ["relational model", "queries"]
+        skills: ["SQL"]
+        clusters: ["Software Engineering", "Data & AI"]
+        level: introduces
+        optional: false
+  - id: "2.1"
+    modules:
+      - code: EXAMPLE-201
+        name: "EXAMPLE Web Development"
+        credits: 3
+        topics: ["HTML", "CSS", "HTTP"]
+        skills: ["HTML", "CSS", "JavaScript"]
+        clusters: ["Software Engineering"]
+        level: practices
+        optional: false
+  - id: "3.1"
+    modules:
+      - code: EXAMPLE-301
+        name: "EXAMPLE Cloud and DevOps Foundations"
+        credits: 3
+        topics: ["containers", "pipelines"]
+        skills: ["Docker", "Git"]
+        clusters: ["DevOps/Cloud"]
+        level: introduces
+        optional: false

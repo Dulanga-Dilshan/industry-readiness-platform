@@ -1,0 +1,83 @@
+# STARTER LIST. Replace it with the canonical skill names from classifier/skills.py:
+#   python scripts/export_skills_glossary.py   (see the constants at the top of that script)
+# One canonical skill name per line. Used to validate curriculum.yaml and to protect terms in spell correction.
+Python
+Java
+JavaScript
+TypeScript
+C
+C++
+C#
+Go
+Rust
+PHP
+SQL
+HTML
+CSS
+React
+Angular
+Vue
+Node.js
+Spring Boot
+Django
+Flask
+FastAPI
+.NET
+REST API
+GraphQL
+Git
+GitHub
+Linux
+Docker
+Kubernetes
+Terraform
+Ansible
+Jenkins
+CI/CD
+AWS
+Azure
+GCP
+Nginx
+PostgreSQL
+MySQL
+MongoDB
+Redis
+Kafka
+RabbitMQ
+Selenium
+Postman
+Jira
+Agile
+Scrum
+Networking
+TCP/IP
+DNS
+CCNA
+Cisco
+Firewall
+VPN
+Wireshark
+Penetration Testing
+Cryptography
+SIEM
+OWASP
+Machine Learning
+Deep Learning
+TensorFlow
+PyTorch
+Pandas
+NumPy
+Power BI
+Tableau
+Data Analysis
+NLP
+Computer Vision
+Spark
+Hadoop
+ETL
+Data Engineering
+Flutter
+Android
+iOS
+QA
+Unit Testing
