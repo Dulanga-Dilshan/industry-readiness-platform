@@ -1,0 +1,21 @@
+schema_version: 1
+program:
+  id: TEST
+  name: "Bad"
+semesters:
+  - id: "3.1"
+    modules:
+      - code: A-1
+        name: "One"
+        credits: 3
+        skills: [Pyhton]
+        clusters: ["Data and AI"]
+        level: introduces
+      - code: A-1
+        name: "Dup"
+        credits: 3
+        skills: [Python]
+        clusters: ["Software Engineering"]
+        level: expert
+  - id: "three"
+    modules: []

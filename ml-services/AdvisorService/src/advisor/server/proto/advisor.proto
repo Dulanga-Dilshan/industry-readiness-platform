@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package advisor.v1;
+
+// Student-facing and admin API of the advisor container.
+// Auth: metadata `x-service-secret` on every call; `x-admin-key` as well on admin calls.
+service AdvisorService {
+  // Streams events (status, corrected, rerouting, reset, token, source, tool, note, done, error).
+  rpc Ask(AskRequest) returns (stream AskEvent);
+  rpc UpsertUserProfile(UserProfile) returns (Ack);
+  rpc DeleteUser(DeleteUserRequest) returns (Ack);
+  rpc ExtractMemories(ExtractRequest) returns (ExtractResult);
+  rpc ReindexKnowledge(Empty) returns (Ack);                 // admin
+  rpc GetStatus(Empty) returns (Status);
+  rpc SetModel(SetModelRequest) returns (ModelConfig);       // admin
+  rpc GetModelConfig(Empty) returns (ModelConfig);           // admin
+  rpc ListProviders(Empty) returns (ProviderList);           // admin
+  rpc ProbeProviders(ProbeRequest) returns (ProbeResult);    // admin
+  rpc GetUsage(UsageRequest) returns (UsageReport);          // admin
+}
+
+message Empty {}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+message Turn {
+  string role = 1;      // "user" or "assistant"
+  string content = 2;
+}
+
+message AskRequest {
+  string question = 1;
+  string user_id = 2;              // trusted: set by the backend from the authenticated session
+  string session_id = 3;
+  repeated Turn turns = 4;         // last N turns (default 6)
+  string tier_override = 5;        // optional: small | large | local-fast | local-reason
+  optional bool remember = 6;      // unset means true
+}
+
+// Same event set as the SSE stream. `data_json` is the JSON object of the event.
+message AskEvent {
+  string type = 1;
+  string data_json = 2;
+}
+
+message Fact {
+  string id = 1;
+  string type = 2;                 // target_cluster | skill_claim | goal | constraint | preference | correction
+  string topic = 3;                // used to replace older facts on the same topic
+  string text = 4;
+  float confidence = 5;
+  string source_session = 6;
+  string timestamp = 7;            // ISO 8601
+}
+
+message Summary {
+  string id = 1;
+  string session_id = 2;
+  string text = 3;
+  string timestamp = 4;
+}
+
+message UserProfile {
+  string user_id = 1;
+  string program_id = 2;
+  string current_semester = 3;     // e.g. "3.1"
+  string target_cluster = 4;
+  repeated string self_assessed_skills = 5;
+  repeated string goals = 6;
+  repeated string constraints = 7;
+  repeated Fact facts = 8;
+  repeated Summary summaries = 9;
+  map<string, bool> consent = 10;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message ExtractRequest {
+  string user_id = 1;
+  string session_id = 2;
+  repeated Turn turns = 3;
+  optional bool remember = 4;      // false skips extraction
+}
+
+message ExtractResult {
+  repeated Fact facts = 1;         // candidates found in this session
+  repeated Fact merged_facts = 2;  // full set after merge, replacement and cap; backend stores and pushes back
+  Summary summary = 3;
+  bool skipped = 4;
+  string reason = 5;
+}
+
+message Status {
+  string version = 1;
+  string index_state = 2;          // building | ready | failed
+  int32 kb_chunks = 3;
+  string embedding_model = 4;
+  string curriculum_status = 5;    // ok | unavailable
+  string curriculum_reason = 6;
+  repeated string enabled_providers = 7;
+}
+
+message SetModelRequest {
+  string tier = 1;                 // set the provider order of this tier ...
+  repeated string order = 2;
+  string provider = 3;             // ... and/or enable or disable one provider
+  optional bool enabled = 4;
+  optional bool personal_data_ok = 5;
+}
+
+message TierOrder {
+  string tier = 1;
+  repeated string providers = 2;
+}
+
+message ModelConfig {
+  repeated TierOrder tiers = 1;
+  repeated ProviderInfo providers = 2;
+  string tool_failure_message = 3;
+}
+
+message ProviderInfo {
+  string name = 1;
+  string kind = 2;
+  string model = 3;
+  bool enabled = 4;
+  bool supports_tools = 5;
+  bool supports_streaming = 6;
+  optional bool tools_ok = 7;
+  bool personal_data_ok = 8;
+  bool cooling_down = 9;
+  double cooldown_seconds = 10;
+  string disabled_reason = 11;
+  int32 context_window = 12;
+}
+
+message ProviderList {
+  repeated ProviderInfo providers = 1;
+}
+
+message ProbeRequest {
+  repeated string providers = 1;   // empty means every enabled provider
+}
+
+message ProbeEntry {
+  string name = 1;
+  bool streaming_ok = 2;
+  bool tools_ok = 3;
+  string error = 4;
+}
+
+message ProbeResult {
+  repeated ProbeEntry entries = 1;
+}
+
+message UsageRequest {
+  int64 since_seconds = 1;         // 0 means all time
+}
+
+message UsageRow {
+  string provider = 1;
+  string agent = 2;
+  int64 requests = 3;
+  int64 tokens_in = 4;
+  int64 tokens_out = 5;
+  int64 errors = 6;
+  double avg_latency_ms = 7;
+}
+
+message UsageReport {
+  repeated UsageRow rows = 1;
+  int64 reroutes = 2;
+}

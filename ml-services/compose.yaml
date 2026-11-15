@@ -15,3 +15,77 @@ services:
       REST_HOST: "0.0.0.0"   # inside the container; host exposure is limited above
       REST_PORT: "8000"
     restart: unless-stopped
+
+  advisor:
+    build:
+      context: ./AdvisorService
+      dockerfile: Dockerfile
+    container_name: irp-advisor-service
+    depends_on:
+      - qdrant
+    ports:
+      - "50052:50052"                                   # gRPC (the backend connects here)
+      - "127.0.0.1:${ADVISOR_REST_PORT:-8001}:8001"     # REST + SSE test and admin API (localhost only)
+    environment:
+      GRPC_PORT: "50052"
+      ENABLE_REST: "${ENABLE_REST:-1}"
+      REST_HOST: "0.0.0.0"
+      REST_PORT: "8001"
+      # required: the service refuses to start without them
+      SERVICE_SECRET: "${SERVICE_SECRET:?set SERVICE_SECRET in .env}"
+      ADMIN_KEY: "${ADMIN_KEY:?set ADMIN_KEY in .env}"
+      # model providers (empty = that provider is skipped)
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      TAVILY_API_KEY: "${TAVILY_API_KEY:-}"
+      # data, embeddings, backend
+      QDRANT_URL: "http://qdrant:6333"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-ollama}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-nomic-embed-text}"
+      BACKEND_BASE_URL: "${BACKEND_BASE_URL:-http://host.docker.internal:8000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - advisor_data:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: irp-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    # no ports: only the advisor talks to it. Add "127.0.0.1:6333:6333" here to open the Qdrant dashboard.
+
+  # Optional local models and embeddings:  docker compose --profile local up -d
+  ollama:
+    image: ollama/ollama:latest
+    container_name: irp-ollama
+    profiles: ["local"]
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # first time: docker exec irp-ollama ollama pull nomic-embed-text
+    # GPU: add a "deploy.resources.reservations.devices" block (see Docker docs) if you have an NVIDIA GPU.
+
+  # Optional fake backend for testing the advisor alone:  docker compose --profile mock up -d
+  # Then set BACKEND_BASE_URL=http://mock-backend:9000 and MOCK_SECRET to the same value as SERVICE_SECRET.
+  mock-backend:
+    build:
+      context: ./AdvisorService
+      dockerfile: Dockerfile
+    container_name: irp-mock-backend
+    profiles: ["mock"]
+    command: ["uvicorn", "mock_backend.app:app", "--host", "0.0.0.0", "--port", "9000"]
+    environment:
+      MOCK_SECRET: "${SERVICE_SECRET:-}"
+    ports:
+      - "127.0.0.1:9000:9000"
+    restart: unless-stopped
+
+volumes:
+  advisor_data:
+  qdrant_data:
+  ollama_data:

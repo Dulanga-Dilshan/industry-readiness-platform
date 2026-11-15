@@ -1,0 +1,140 @@
+# Contract between the advisor (client) and the backend (server). The advisor only reads.
+# Auth on every call: header X-Service-Secret (shared secret) and X-User-Id (the student the question is for).
+# Every analytics response MUST contain "as_of" (ISO 8601: when the data was last refreshed; updated daily).
+# Percent shares are computed by the backend so the model never does arithmetic.
+# Until an endpoint exists the backend may answer 404 or 501: the advisor then says "not available yet".
+openapi: 3.0.3
+info:
+  title: Advisor read-only tool endpoints
+  version: "1.0"
+components:
+  parameters:
+    window:
+      name: window
+      in: query
+      schema: {type: string, enum: ["24h", "30d", "6m", "1y"], default: "6m"}
+    cluster:
+      name: cluster
+      in: query
+      schema:
+        type: string
+        enum: ["Software Engineering", "DevOps/Cloud", "Cybersecurity", "Networking & Infrastructure", "Data & AI"]
+  schemas:
+    AsOf: {type: string, format: date-time}
+    Job:
+      type: object
+      required: [key, title, company, link]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        company: {type: string}
+        cluster: {type: string}
+        skills: {type: array, items: {type: string}}
+        location: {type: string}
+        posted_at: {type: string, format: date-time}
+        link: {type: string, description: "apply link on the source site"}
+        description: {type: string, description: "only on GET /jobs/{key}"}
+paths:
+  /api/v1/analytics/cluster-demand:
+    get:
+      summary: Postings per cluster
+      parameters: [{$ref: "#/components/parameters/window"}]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [as_of, items]
+                properties:
+                  as_of: {$ref: "#/components/schemas/AsOf"}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [cluster, count, share_pct]
+                      properties: {cluster: {type: string}, count: {type: integer}, share_pct: {type: number}}
+  /api/v1/analytics/top-skills:
+    get:
+      summary: Most demanded skills for a cluster
+      parameters:
+        - {$ref: "#/components/parameters/cluster"}
+        - {$ref: "#/components/parameters/window"}
+        - {name: limit, in: query, schema: {type: integer, default: 15, maximum: 30}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [as_of, items]
+                properties:
+                  as_of: {$ref: "#/components/schemas/AsOf"}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [skill, count]
+                      properties: {skill: {type: string, description: "canonical name from classifier/skills.py"}, count: {type: integer}}
+  /api/v1/analytics/demand-trend:
+    get:
+      summary: Monthly counts for one cluster OR one skill
+      parameters:
+        - {$ref: "#/components/parameters/cluster"}
+        - {name: skill, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/window"}
+        - {name: granularity, in: query, schema: {type: string, enum: [month], default: month}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [as_of, series]
+                properties:
+                  as_of: {$ref: "#/components/schemas/AsOf"}
+                  series:
+                    type: array
+                    items:
+                      type: object
+                      required: [period, count]
+                      properties: {period: {type: string, example: "2026-10"}, count: {type: integer}}
+  /api/v1/jobs:
+    get:
+      summary: Search job postings
+      parameters:
+        - {name: query, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/cluster"}
+        - {name: skills, in: query, schema: {type: string}, description: "comma separated"}
+        - {name: location, in: query, schema: {type: string}}
+        - {name: posted_within_days, in: query, schema: {type: integer}}
+        - {name: limit, in: query, schema: {type: integer, default: 10, maximum: 20}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  as_of: {$ref: "#/components/schemas/AsOf"}
+                  total: {type: integer}
+                  items: {type: array, items: {$ref: "#/components/schemas/Job"}}
+  /api/v1/jobs/{key}:
+    get:
+      summary: One job with description
+      parameters: [{name: key, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job]
+                properties: {job: {$ref: "#/components/schemas/Job"}}
+        "404": {description: unknown job}

@@ -1,0 +1,18 @@
+schema_version: 1
+program:
+  id: TEST-PROGRAM
+  name: "Test program"
+  version: "1"
+semesters:
+  - id: "1.1"
+    modules:
+      - {code: T-101, name: "Intro", credits: 3, topics: [a], skills: [Python], clusters: ["Software Engineering"], level: introduces}
+  - id: "2.1"
+    modules:
+      - {code: T-201, name: "Databases", credits: 3, topics: [a], skills: [SQL], clusters: ["Data & AI"], level: practices}
+  - id: "3.1"
+    modules:
+      - {code: T-301, name: "Web", credits: 3, topics: [a], skills: [JavaScript, HTML], clusters: ["Software Engineering"], level: practices}
+  - id: "4.1"
+    modules:
+      - {code: T-401, name: "Cloud", credits: 3, topics: [a], skills: [Docker], clusters: ["DevOps/Cloud"], level: advanced}

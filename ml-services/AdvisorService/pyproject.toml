@@ -1,17 +1,36 @@
 [project]
-name = "advisorservice"
+name = "advisor"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
-    "google-genai>=2.33.0",
-    "python-dotenv>=1.2.4",
+    "grpcio",
+    "protobuf",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "pydantic",
+    "pyyaml",
+    "rank-bm25",
+    "pyspellchecker",
+    "qdrant-client",
 ]
 
-[project.scripts]
-advisorservice = "advisorservice:main"
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "grpcio-tools",
+]
 
 [build-system]
-requires = ["uv_build>=0.13.5,<0.14.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_common", "src/advisor"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
