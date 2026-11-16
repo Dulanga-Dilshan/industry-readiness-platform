@@ -40,29 +40,36 @@ async def serve() -> None:
 
     tasks = []
     uv = None
-    if settings.enable_rest:
-        uv = uvicorn.Server(uvicorn.Config(create_rest_app(app), host=settings.rest_host, port=settings.rest_port,
-                                           log_level="warning"))
-        tasks.append(asyncio.create_task(uv.serve()))
-        log.info("REST/SSE listening on %s:%s", settings.rest_host, settings.rest_port)
+    try:
+        if settings.enable_rest:
+            uv = uvicorn.Server(uvicorn.Config(create_rest_app(app), host=settings.rest_host,port=settings.rest_port, log_level="warning"))
+            uv.install_signal_handlers = lambda: None      
+            tasks.append(asyncio.create_task(uv.serve()))
+            log.info("REST/SSE listening on %s:%s", settings.rest_host, settings.rest_port)
 
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop.set)
-        except NotImplementedError:
-            pass
-    await stop.wait()
-    log.info("shutting down")
-    if uv:
-        uv.should_exit = True
-    await server.stop(5)
-    await asyncio.gather(*tasks, return_exceptions=True)
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop.set)
+            except NotImplementedError:
+                pass                                 
+        await stop.wait()
+    except asyncio.CancelledError:
+        pass                                               
+    finally:
+        log.info("shutting down")
+        if uv:
+            uv.should_exit = True
+        await server.stop(2)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main() -> None:
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
