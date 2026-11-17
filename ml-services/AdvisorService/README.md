@@ -26,6 +26,7 @@ tests/             158+ tests, all with fake models (no quota used)
    `docker exec irp-ollama ollama pull nomic-embed-text`) or set `EMBEDDING_PROVIDER=gemini`, `EMBEDDING_MODEL=gemini-embedding-2`.
 3. Without a backend: `docker compose --profile mock up -d` and `BACKEND_BASE_URL=http://mock-backend:9000`.
 4. Tests: `uv sync` then `uv run pytest` (inside AdvisorService).
+5. run local : `uv run python -m advisor`
 
 The service refuses to start without `SERVICE_SECRET` and `ADMIN_KEY` (different values). The knowledge index builds
 in the background at first start; `GET /advisor/health` shows `index: ready`.
