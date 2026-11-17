@@ -1,12 +1,14 @@
 """REST API for testing only. It calls the same services as the gRPC handlers,
 so what works here works over gRPC. Open http://127.0.0.1:8000/docs to try it."""
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import converters
 from .services import classify_items, scrape_latest
 
 app = FastAPI(title="Scraper and classifier: test API")
+
+router = APIRouter(prefix="/scraper", tags=["Scraper"])
 
 
 class ScrapeBody(BaseModel):
@@ -26,12 +28,12 @@ class ClassifyBody(BaseModel):
     items: list[ClassifyItemBody]
 
 
-@app.get("/health")
+@router.get("/health")
 async def health():
     return {"status": "ok"}
 
 
-@app.post("/scrape-latest")
+@router.post("/scrape-latest")
 async def scrape_latest_endpoint(body: ScrapeBody):
     """Runs the real scrapers. While testing, use sources=["itpro"] to keep it small."""
     try:
@@ -54,7 +56,7 @@ async def scrape_latest_endpoint(body: ScrapeBody):
     }
 
 
-@app.post("/classify")
+@router.post("/classify")
 async def classify_endpoint(body: ClassifyBody):
     items = [(i.key, i.title, i.description) for i in body.items]
     results = await classify_items(items)
@@ -63,3 +65,7 @@ async def classify_endpoint(body: ClassifyBody):
          "skills": list(c.skills), "scores": c.scores}
         for key, c in results
     ]
+
+
+app.include_router(router)
+

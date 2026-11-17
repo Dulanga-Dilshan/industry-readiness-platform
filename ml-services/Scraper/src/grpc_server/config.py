@@ -8,7 +8,7 @@ MAX_MESSAGE_MB = int(os.getenv("MAX_MESSAGE_MB", "16"))
 # The REST test API runs in the same process. Turn it off in production.
 ENABLE_REST = os.getenv("ENABLE_REST", "1") == "1"
 REST_HOST = os.getenv("REST_HOST", "127.0.0.1")   # local only; it is a testing tool
-REST_PORT = int(os.getenv("REST_PORT", "8000"))
+REST_PORT = int(os.getenv("REST_PORT", "9000"))
 
 # Per-source options for the 24-hour run: it only needs recent postings.
 # For a one-off backfill, pass larger values through scrape_latest(options=...).
