@@ -1,6 +1,6 @@
 # Backend Plan (Industry Readiness Platform)
 
-Status: DRAFT v3. Structure matches your existing code; decisions from your answers (Q1-Q15) are applied. Remaining open items are in section 12. Section 12 lists the questions I need answered. Defaults in this document are proposals, not decisions.
+Status: DRAFT v5. All open questions answered; ready for milestone 1 when you say go. Structure matches your existing code; decisions from your answers (Q1-Q15) are applied. Remaining open items are in section 12. Section 12 lists the questions I need answered. Defaults in this document are proposals, not decisions.
 
 What I already know from the project:
 - The backend is FastAPI (the Scraper README says so). It is the only client of the ML services.
@@ -53,7 +53,7 @@ Rules that keep it safe and simple:
 | Database | PostgreSQL (decided; added to `compose.yaml`) | analytics queries (group by month, cluster) and arrays/JSON fit well |
 | ORM / migrations | SQLAlchemy 2 (async) + Alembic | standard, explicit migrations |
 | Validation | Pydantic v2 | comes with FastAPI |
-| Scheduler / jobs | Celery worker + Celery beat (decided), broker = Redis (confirm, section 12) | runs `ScrapeLatest`; interval is changeable by the admin at runtime (see 5.1, 5.6) |
+| Scheduler / jobs | Celery worker + Celery beat (decided), broker = Redis DB 1 (decided) | runs `ScrapeLatest`; interval is changeable by the admin at runtime (see 5.1, 5.6) |
 | gRPC clients | `grpc.aio`, stubs generated from `jobs.proto` and `advisor.proto` | same as the services |
 | Auth | Own accounts: email + password, JWT access token (short) + refresh token; roles `student` and `admin` | decided |
 | Tests | pytest + httpx ASGI + fake gRPC servers | same style as the services |
@@ -136,7 +136,7 @@ Notes:
 
 | Where | Issue | Planned fix |
 |---|---|---|
-| `endpoints/health.py` | uses `requests` (blocking, inside an async route, and not in `pyproject.toml`) and HTTP `/health` calls | use the gRPC health check (`grpc.aio`) for scraper and advisor (decided); separate liveness from readiness |
+| `endpoints/health.py` | uses `requests` (blocking, inside an async route, and not in `pyproject.toml`) and HTTP `/health` calls | gRPC only (decided). Advisor: call `GetStatus` (needs `x-service-secret`). Scraper: add the standard gRPC health service (`grpc.health.v1`, package `grpcio-health-checking`) to the scraper server (small ml-services change, section 11), then the backend calls `Health.Check`. Separate liveness (`/health`: backend is up) from readiness (`/health/ready`: postgres, redis, scraper, advisor) |
 | `endpoints/health.py` | bare `except:`, a `print`, and the 5-minute cache hides outages | catch specific errors, log, cache ~10-15 s |
 | `core/config.py` | env var named `SCRAPPER_URL` (typo, differs from `SCRAPER_URL`); plain `os.getenv`, no validation; scraper URL default has a `/scraper` path | `pydantic-settings` class, fix the name, add DB URL, secrets, JWT settings |
 | `backend/main.py` | CORS `allow_origins=["*"]` | restrict to the frontend origin(s) from config |
@@ -145,27 +145,53 @@ Notes:
 
 ### 3.3 Docker Compose (local, one file, no hosting yet)
 
-For now one compose file starts everything on your machine. It will be a root `compose.yaml` that `include:`s `backend/compose.yaml` and the ml-services compose files (so each part can still be started alone). Everything shares one network, so containers reach each other by service name. No domain, no HTTPS yet; you open `http://localhost:8000/docs`.
+Your `ml-services/compose.yaml` already defines the services below. The root `compose.yaml` will `include:` it and `backend/compose.yaml`, then everything runs on one network and containers reach each other by service name. No domain, no HTTPS; you open `http://localhost:8000/docs`.
 
-| Service | Image / build | Host port | Notes |
+| Service | From | Ports (container) | Notes |
 |---|---|---|---|
-| `postgres` | postgres:16-alpine | 5432 (dev only) | volume `pg_data`; password in the compose file (test only) |
-| `redis` | redis:7-alpine | 6379 (dev only) | cache; DB 0 = cache, DB 1 = Celery broker (if confirmed) |
-| `backend` | build `./backend` | 8000 | runs Alembic upgrade, then uvicorn; seeds the admin user |
-| `worker` | same image as backend | none | `celery -A workers.celery_app worker` |
-| `beat` | same image as backend | none | `celery -A workers.celery_app beat` (exactly one instance) |
-| `scraper` | from ml-services | none | gRPC, reached as `scraper:<port>` |
-| `advisor` | from ml-services | none | gRPC, reached as `advisor:<port>` |
+| `postgres` | backend compose (new) | 5432 | volume `pg_data`; password from `secrets.txt` |
+| `redis` | backend compose | 6379 | DB 0 = cache + settings, DB 1 = Celery broker |
+| `backend` | backend compose (new Dockerfile) | 8000 | migrations, seed admin, uvicorn |
+| `worker`, `beat` | same image as backend | none | Celery; exactly one `beat` |
+| `scraper` | ml-services | gRPC 50051, REST test 8000 | **no auth** on gRPC (private network only) |
+| `advisor` | ml-services | gRPC 50052, REST/SSE 8001 | needs `SERVICE_SECRET` + `ADMIN_KEY`, refuses to start without them |
+| `qdrant` | ml-services | 6333 (internal) | advisor vector store |
+| `ollama` | ml-services, profile `local` | 11434 | optional local embeddings/models |
+| `mock-backend` | ml-services, profile `mock` | 9000 | fake backend; not needed once ours runs |
 
-Test-only secrets written directly in the compose file (replace with `.env` or secret files before any real deployment): Postgres password, `ADMIN_EMAIL` / `ADMIN_PASSWORD` for the seeded admin, `JWT_SECRET`, `ADVISOR_SERVICE_SECRET`, advisor `ADMIN_KEY`.
+Things to set when combining:
+- **Port clash:** the scraper publishes its REST test API on host `127.0.0.1:${REST_PORT:-8000}`, the same port as the backend. Set `REST_PORT=8002` (root `.env`) or remove that mapping.
+- **Advisor -> backend URL:** `BACKEND_BASE_URL` defaults to `http://host.docker.internal:8000`. In the combined file set it to `http://backend:8000`.
+- **gRPC hosts:** backend uses `scraper:50051` and `advisor:50052`. Remove the published host ports for 50051/50052 in the combined file (the scraper has no auth).
+- **Secrets (decided): one `secrets.txt` at the repo root**, plain `KEY=value` lines, in `.gitignore`; commit a `secrets.txt.example`. Compose only reads `.env` by default, so start with `docker compose --env-file secrets.txt up --build` (this also fills `${SERVICE_SECRET:?}` and `${ADMIN_KEY:?}` inside the included ml-services file). It holds `SERVICE_SECRET`, `ADMIN_KEY`, provider API keys, `POSTGRES_PASSWORD`, `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`; the backend gets the first two as `ADVISOR_SERVICE_SECRET` and `ADVISOR_ADMIN_KEY`. This is not Docker's `secrets:` feature; later you can move to that or to real secret files without changing the code, because the backend only reads environment variables.
+- **Secret reuse:** the advisor sends the same `SERVICE_SECRET` back in `X-Service-Secret` when it calls our tool endpoints, so the backend checks incoming tool calls against that same value. `ADMIN_KEY` stays backend-only (admin proxy).
+- Start order: `depends_on` with healthchecks: postgres, redis first; backend waits for them; advisor waits for qdrant.
 
-Rules: `depends_on` with healthchecks (backend waits for postgres and redis); publish only the ports you need; one named volume per stateful service.
+### 3.4 What the ml-services code tells us (read from the zips)
+
+| Topic | Finding | Effect on the backend |
+|---|---|---|
+| Scraper contract | `ScraperService.ScrapeLatest(sources, known_keys, limit, max_age_days)` streams `ClassifiedJob` then one `ScrapeSummary`. `ClassifierService.Classify` also exists. Message limit 16 MB. | `known_keys` is sent in one request: fine for thousands of keys. |
+| Known jobs | Known jobs come back with `is_new=false`, empty description, no cluster. | Ignore them (we do not track `last_seen`). |
+| Job timestamps | `posted_at` may be unset; `scraped_at` is always set. | `collected_at` = scraper `scraped_at` (fallback: now). |
+| **Pruning vs known keys** | If we delete old jobs at the cap, their keys are no longer "known", so the scraper returns them as new again and we re-insert, then prune again (endless churn). | Keep a small `seen_job_keys` table (key, first_seen) that is **not** pruned with jobs; send these as `known_keys`. Prune keys only after a long time (e.g. 180 days; open question F). |
+| **Cluster names differ** | Scraper: `DevOps / Cloud Engineering`, `Data & AI Engineering`. Advisor tool contract (`backend_tools.openapi.yaml`): `DevOps/Cloud`, `Data & AI`. The other three match. | Pick one set (open question G). Until then the backend keeps scraper names in the database and maps to/from the advisor names at the tool endpoints. |
+| Skill names | Canonical skills are the `_SKILLS` list in `Scraper/src/classifier/skills.py`. | Use it to validate the `skills` filter (the advisor glossary is only a starter). |
+| Advisor auth | gRPC metadata `x-service-secret` on every call; admin RPCs also need `x-admin-key`. | gRPC client adds the metadata; admin key only on admin calls. |
+| Advisor gRPC admin | Only: `SetModel`, `GetModelConfig`, `ListProviders`, `ProbeProviders`, `GetUsage`, `ReindexKnowledge`. | Admin page can do model order, provider on/off, personal_data_ok, providers, probe, usage, reindex via gRPC. |
+| Advisor REST-only admin | Runtime config (budgets, cache threshold, tool-failure message), quota, metrics, validate (knowledge + curriculum), capacity, cache clear, faults, eval, embedding switch exist only as REST. | Not reachable with "gRPC only" (open question H). |
+| Chat turns | `Ask` takes the last N `turns` from the caller; the advisor does not keep chat history itself. | Someone must supply turns (open question I). |
+| Memory | `ExtractMemories` returns `merged_facts` + `summary`; the proto says the backend stores them and pushes them back with `UpsertUserProfile`. The advisor also keeps its own cache (`profiles.sqlite`). | Still deferred, but "advisor handles it" only holds if we later store what it returns. |
+| Consent | The advisor reads `consent.store_memory`; from a search of its code only an explicit `false` blocks memory. | Until consent is built, backend sends `consent = {store_memory: false}` so nothing is stored by accident (open question J). |
+| Profile values | `current_semester` looks like `3.1` (validated in `curriculum/validator.py`); `program_id` must match `curriculum.yaml`, which is still a template with example data. | Validate semester format in the backend; `program_id` from config. |
+| Stubs | Advisor stubs import as `advisor.server.proto...`, generated with `-I src`. | Put `jobs.proto` and `advisor.proto` in `src/proto/` and generate with `-I src` so imports become `proto.jobs_pb2` etc. |
 
 ## 4. Data model (first version)
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `jobs` | `key` (PK, "source:id"), source, source_id, title, company, location, link, description, posted_at, **collected_at**, cluster, confidence | `key` comes from the scraper. No open/closed status (we cannot detect it). Known keys are skipped. Oldest rows by `collected_at` are deleted when the count exceeds `max_jobs` (admin setting, default ~1000). |
+| `jobs` | `key` (PK, "source:id"), source, source_id, title, company, location, link, description, posted_at, **collected_at**, cluster, confidence | `key` comes from the scraper. No open/closed status (we cannot detect it). Known keys are skipped (checked against `seen_job_keys`). Oldest rows by `collected_at` are deleted when the count exceeds `max_jobs` (admin setting, default ~1000). |
+| `seen_job_keys` | key (PK), first_seen_at | every key ever collected; **not** deleted with jobs; sent to the scraper as `known_keys` (see 3.4) |
 | `job_skills` | job_key, skill | canonical name from `classifier/skills.py`; deleted with the job |
 | `ingest_runs` | id, started_at, finished_at, total, new_jobs, per_source_counts (json), errors (json), status, triggered_by (schedule / admin) | one row per run; also drives `as_of` |
 | `daily_cluster_counts` | date, cluster, count | written at ingest time; **survives job deletion**, so trends keep history even after the cap prunes old jobs |
@@ -181,8 +207,8 @@ Deferred (the advisor handles chat history and memory for now; revisit later): `
 
 ### 5.1 Scheduled ingest (scraper, Celery)
 1. Celery beat runs a cheap `ingest.tick` task every minute. The tick reads `scrape_interval_hours` and `ingest_enabled` from settings (Redis cache, falls back to DB) and compares with the last `ingest_runs.started_at`. If a run is due it starts `ingest.run`. This is how the admin can change the interval without restarting anything (beat's own schedule is static). The admin "Run now" button calls `ingest.run` directly.
-2. `ingest.run` takes a Redis lock (no two runs at once), loads known keys, and calls `ScrapeLatest(known_keys, max_age_days)` over gRPC.
-3. For each streamed `ClassifiedJob`: if `is_new`, insert job + skills with `collected_at = now`; known jobs are ignored.
+2. `ingest.run` takes a Redis lock (no two runs at once), loads all keys from `seen_job_keys`, and calls `ScrapeLatest(known_keys, max_age_days)` over gRPC (no auth metadata needed for the scraper).
+3. For each streamed `ClassifiedJob`: if `is_new`, insert job + skills (`collected_at` = scraper `scraped_at`) and add its key to `seen_job_keys`; known jobs are ignored.
 4. On the final `ScrapeSummary`: write `ingest_runs` (per-source errors included).
 5. Update the daily count tables for the new jobs, then prune: if `count(jobs) > max_jobs`, delete the oldest by `collected_at`. All in one transaction.
 6. Scraper down: retry with backoff (3 times), record the failure, keep serving old data (`as_of` stays old, so the advisor marks it stale after 48 hours).
@@ -197,7 +223,7 @@ Deferred (the advisor handles chat history and memory for now; revisit later): `
 - Every analytics response carries `as_of` = finish time of the latest successful ingest run.
 
 ### 5.3 Advisor chat (student -> advisor)
-1. `POST /api/v1/advisor/ask` (SSE). Backend authenticates, calls gRPC `Ask(question, user_id, session_id, ...)`. History and memory are handled by the advisor for now, so the backend sends no stored turns.
+1. `POST /api/v1/advisor/ask` (SSE). Backend authenticates, calls gRPC `Ask(question, user_id, session_id, ...)`. The advisor does not keep chat history, so turns must come from somewhere (open question I; default: the last 6 turns per session kept in Redis with a TTL, no database table).
 2. Relay events as SSE unchanged: `status, corrected, rerouting, reset, token, source, tool, note, done, error`. The frontend must handle `reset` (discard text so far).
 3. If the browser disconnects, cancel the gRPC call (the advisor then stops all work and spends no more quota).
 4. Backend never forwards `user_id` from the client; it always comes from the authenticated session. Add timeouts and a per-user rate limit (Redis) in front of the advisor.
@@ -206,12 +232,14 @@ Deferred (the advisor handles chat history and memory for now; revisit later): `
 - On profile create/update: `UpsertUserProfile` (semester, cluster, skills, goals, constraints).
 - On startup and after an advisor restart: re-push the profile lazily when the user next chats (the advisor treats its copy as a cache).
 - Account deletion: delete in the database, then `DeleteUser` on the advisor (retry if it fails).
+- Until consent exists, send `consent = {store_memory: false}` in every profile (3.4).
 - Deferred until the advisor is finished: `ExtractMemories`, memory facts/summaries, chat history, consent.
 
 ### 5.5 Tool endpoints for the advisor (read-only)
 Implement exactly `ml-services/AdvisorService/contracts/backend_tools.openapi.yaml`:
 `GET /api/v1/analytics/cluster-demand | top-skills | demand-trend`, `GET /api/v1/jobs`, `GET /api/v1/jobs/{key}`.
-- Auth: header `X-Service-Secret` must equal the shared secret (constant-time compare). Different secret from the one students use.
+- Auth: header `X-Service-Secret` must equal the advisor's `SERVICE_SECRET` (constant-time compare, same logic as `ml_common/auth.py`). It is a different secret from student tokens.
+- Cluster names: the contract uses `DevOps/Cloud` and `Data & AI`; the scraper uses `DevOps / Cloud Engineering` and `Data & AI Engineering` (see 3.4).
 - `X-User-Id` is informational (logging); these endpoints return public market data only.
 - Until built, returning 404/501 is fine: the advisor says "not available yet".
 
@@ -225,7 +253,7 @@ Stored in `app_settings`, cached in Redis, every change written to `audit_log`. 
 | `scrape_max_age_days` | (scraper default) | `ScrapeLatest` |
 | `max_jobs` | 1000 | pruning after each run |
 
-Advisor settings (LLM/model order, providers on/off, usage, quota, reindex, validate) are **not** copied into our database. The backend proxies to the advisor's admin API (single source of truth) and may cache the read view in Redis for a short time. Admin endpoints: `GET/PUT /admin/settings`, `GET/PUT /admin/advisor/...`, `GET /admin/audit`.
+Advisor settings are **not** copied into our database. The backend proxies to the advisor (single source of truth, `x-admin-key` added server-side) and may cache the read view in Redis for a short time. Over gRPC the admin page can: view/set model order per tier (`GetModelConfig`/`SetModel`), enable/disable a provider, toggle `personal_data_ok`, list providers, probe providers, view usage, reindex the knowledge base. Quota, runtime config (budgets, cache), validate, metrics and capacity are REST-only in the advisor today (open question H). Admin endpoints: `GET/PUT /admin/settings`, `GET/PUT /admin/advisor/model`, `GET /admin/advisor/providers|usage|status`, `POST /admin/advisor/probe|reindex`, `GET /admin/audit`.
 
 ## 6. API for the frontend (proposal)
 
@@ -282,8 +310,9 @@ All routes versioned under `/api/v1`. Errors use one JSON shape: `{code, message
 | 7 | Hardening: monitoring, load test, docs, move secrets to env/secret files | agreed checklist passes |
 
 ## 11. Things I will need from you (later, not blocking the plan)
-- The real `classifier/skills.py` canonical names (for validating skill filters).
-- Real curriculum file (already needed by the advisor).
+- Received: `jobs.proto`, `advisor.proto`, the ml-services compose, skill names (`skills.py`), tool contract.
+- Small change needed in the scraper (ml-services): register the standard gRPC health service in `grpc_server/server.py` and add `grpcio-health-checking` to its dependencies. I will give you the exact lines when we reach milestone 1 (you own that code).
+- Real `curriculum.yaml` (still a template with example data) and the real `skills_glossary.txt`.
 - Frontend contract once the UI is designed (event handling for `reset`, `note`, `source`).
 
 ## 12. Questions and decisions
@@ -305,8 +334,19 @@ Answered
 14. Redis: cache (health, settings, rate limits, refresh tokens).
 15. Keep `db/`; no `core/database.py`.
 
+Decided this round
+- A. Celery broker: Redis (DB 1).
+- B. Over `max_jobs`: delete the oldest by `collected_at` (needs `seen_job_keys`, section 3.4).
+- C. Files received and read (3.4).
+
+Decided (last round)
+- E. Health checks over gRPC for both: advisor via `GetStatus`, scraper via the standard gRPC health service (to be added to the scraper).
+- F. `seen_job_keys` kept 180 days (admin setting `seen_keys_retention_days`).
+- G. Database keeps scraper cluster names; tool endpoints map to and from the advisor names (`DevOps/Cloud`, `Data & AI`). One mapping table in code.
+- H. REST-only advisor admin is skipped for now; admin page uses the gRPC set. Add gRPC methods to the advisor later.
+- I. Last 6 turns per session kept in Redis with a TTL (~2 h); no database table.
+- J. Until consent is built, every profile is sent with `consent = {store_memory: false}`.
+- K. Secrets in `secrets.txt` at the root, used with `docker compose --env-file secrets.txt`.
+
 Still open
-- A. Celery broker: use Redis (DB 1)? Celery needs a broker; Redis is already there. (default: yes)
-- B. When over `max_jobs`, delete the oldest by `collected_at`? Daily counts keep the history. (default: yes)
-- C. Files needed from you: `jobs.proto`, `advisor.proto`, `ml-services/compose.yaml` (service names, ports, build paths), and the list of advisor admin functions you want on the admin page.
-- D. Start coding milestone 1?
+- None. Waiting for your go to start milestone 1.
