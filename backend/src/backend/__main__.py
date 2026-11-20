@@ -1,4 +1,3 @@
-import utils.session
 import uvicorn
 
 if __name__ == "__main__":
